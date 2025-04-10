@@ -33,7 +33,7 @@ environment {
 }
 
 resource "aws_iam_role" "lambda_exec_role" {
-  name = "lambda_exec_role"
+  name = "lambda_exec_role_${var.function_name}"
   
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

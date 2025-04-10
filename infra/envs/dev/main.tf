@@ -111,6 +111,43 @@ module "lambda_upload_songs" {
   })
 }
 
+module "lambda_download_songs" {
+  source           = "../../modules/lambda"
+  function_name    = "download_song_function"
+  lambda_bucket_id = module.s3_lambda_code.s3_bucket_id
+  handler          = "lambda/download_song/index.handler"
+  runtime          = "nodejs22.x"
+  timeout          = 60
+  memory_size      = 128
+  lambda_code_path = "../../../lambda/download_song"
+  environment_variables = {
+    S3_BUCKET_NAME = module.s3_bucket_audio.s3_bucket_id
+    DYNAMODB_TABLE = module.dynamodb_songs.table_name
+  }
+  iam_policy_json = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject"
+        ],
+        Effect   = "Allow",
+        Resource = "arn:aws:s3:::${module.s3_bucket_audio.s3_bucket_id}/*"
+      },
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        Effect   = "Allow",
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}
+
 # Lambda and API Gateway Module
 module "lambda_api_gateway" {
   source = "../../modules/api_gateway" # Reference to the Lambda and API Gateway module
@@ -120,6 +157,8 @@ module "lambda_api_gateway" {
   dynamodb_table_name            = module.dynamodb_songs.table_name      # Referencing the DynamoDB table
   upload_song_lambda_invoke_arn  = module.lambda_upload_songs.lambda_invoke_arn
   upload_song_lambda_invoke_name = module.lambda_upload_songs.lambda_name
+  download_song_lambda_invoke_arn  = module.lambda_download_songs.lambda_invoke_arn
+  download_song_lambda_invoke_name = module.lambda_download_songs.lambda_name
   region                         = var.region
   cognito_user_pool_client_id    = module.cognito.user_pool_client_id
   cognito_user_pool_id           = module.cognito.user_pool_id
