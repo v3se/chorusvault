@@ -21,13 +21,36 @@ function App() {
   // JWT
   const [accessToken, setAccessToken] = useState(null); // Add this state
   // State for song upload
+  const [songs, setSongs] = useState([]); // All song metadata from DynamoDB
   const [songName, setSongName] = useState('');
   const [version, setVersion] = useState('');
   const [songFile, setSongFile] = useState(null);  // The file to be uploaded
   const [isUploading, setIsUploading] = useState(false); // For tracking upload state
   const [uploadError, setUploadError] = useState(null);  // For upload error messages
   const [uploadSuccess, setUploadSuccess] = useState(false); // For upload success
+  const [songUrl, setSongUrl] = useState(null); // State to store the song URL for playback
 
+  const fetchSongs = async (token) => {
+    try {
+      const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/fetch_song_metadata`, {
+        headers: { Authorization: token }
+      });
+      console.log(response)
+      setSongs(response.data.items || []);
+    } catch (error) {
+      console.error('Failed to fetch songs:', error);
+    }
+  };
+
+  const handlePlaySong = async (songId) => {
+    try {
+      const url = await getPresignedUrlForGet(songId);
+      setSongUrl(url);
+    } catch (error) {
+      setError('Unable to play song.');
+    }
+  };
+  
   // Handle login when the user clicks the button
   const handleLogin = async () => {
     setLoading(true);
@@ -55,9 +78,11 @@ function App() {
       if (accessToken) {
         setAccessToken(accessToken);  // Store the token in state or your preferred storage
         setError(null); // Clear any errors
+        await fetchSongs(accessToken);
       } else {
         setError('Failed to retrieve access token.');
       }
+
     } catch (err) {
       console.error('Login failed', err);
       setError('Login failed. Please check your credentials and try again.');
@@ -119,11 +144,12 @@ function App() {
   // Get Presigned URL from the backend (Lambda function via API Gateway)
   const getPresignedUrl = async () => {
     try {
-      const response = await axios.post(process.env.REACT_APP_API_UPLOAD_URL, {
+      const response = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/upload_song`, {
         version,
         timestamp: Date.now(),
         song_name: songName
-      }, {
+      }, 
+      {
         headers: { Authorization: accessToken }
       });
       return response.data.presigned_url;
@@ -131,7 +157,37 @@ function App() {
       console.error('Error fetching presigned URL:', error);
       throw new Error('Unable to get presigned URL.');
     }
-  }; 
+  };
+
+  // Function to get presigned URL for GET request (retrieve song from S3)
+  const getPresignedUrlForGet = async (songId) => {
+    console.log(songId)
+    try {
+      const response = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/download_song`, {
+        song_id: songId,
+      },
+      {
+        headers: { Authorization: accessToken }
+      });
+      const { presigned_url } = response.data;
+
+      return presigned_url;  // The presigned URL to be used in the audio player
+    } catch (error) {
+      console.error('Error fetching presigned URL for GET', error);
+      throw new Error('Unable to get presigned URL.');
+    }
+  };
+
+const handleTogglePlay = () => {
+  const audioElement = document.getElementById('audio-player');
+  if (audioElement.paused) {
+    audioElement.play().catch((error) => {
+      console.error('Error starting playback:', error);
+    });
+  } else {
+    audioElement.pause();
+  }
+};
 
   // Handle song upload to S3
   const handleUpload = async () => {
@@ -152,6 +208,11 @@ function App() {
 
       console.log('Song uploaded successfully:', uploadResponse);
       setUploadSuccess(true);
+      console.log(uploadResponse)
+      // After the song is uploaded, get the presigned URL for GET and set the song URL
+      const songId = uploadResponse.data.song_id; // Assuming the response contains a song_id
+      const songUrl = await getPresignedUrlForGet(songId);
+      setSongUrl(songUrl);  // Set the song URL for playback
     } catch (error) {
       console.error('Error uploading song:', error);
       setUploadError('Error uploading song. Please try again.');
@@ -164,13 +225,14 @@ function App() {
     <div className="App">
       {/* User login status display */}
       {accessToken && (
-      <div className="user-info-container">
-      <span className="user-info">@{username}</span>
-      <button className="logout-button" onClick={handleLogout}>
-        Logout
-      </button>
-    </div>
+        <div className="user-info-container">
+          <span className="user-info">@{username}</span>
+          <button className="logout-button" onClick={handleLogout}>
+            Logout
+          </button>
+        </div>
       )}
+
       {/* Login Form */}
       {!accessToken && (
         <div className="login-container">
@@ -219,32 +281,63 @@ function App() {
       {accessToken && (
         <div className="upload-section">
           <h2>Upload Song</h2>
-          {/* Song name input */}
           <input
             type="text"
             placeholder="Song Name"
             value={songName}
             onChange={(e) => setSongName(e.target.value)}
           />
-
-          {/* Version input */}
           <input
             type="text"
             placeholder="Version (e.g. v1)"
             value={version}
             onChange={(e) => setVersion(e.target.value)}
           />
-
           <input type="file" onChange={handleFileChange} />
-
           <button onClick={handleUpload} disabled={isUploading}>
             {isUploading ? 'Uploading...' : 'Upload Song'}
           </button>
 
           {uploadSuccess && <p style={{ color: 'green' }}>Song uploaded successfully!</p>}
           {uploadError && <p style={{ color: 'red' }}>{uploadError}</p>}
+
+          <div className="song-list-section">
+            <h2>Your Songs</h2>
+            {songs.length === 0 && <p>No songs uploaded yet.</p>}
+            <ul>
+              {songs.map((song) => {
+                const songName = song.song_name?.S || "Unknown Song";
+                const version = song.version?.S || "No version";
+                const songId = song.song_id?.S || "No ID";
+
+                return (
+                  <li
+                    key={songId}
+                    onClick={() => handlePlaySong(songId)}
+                    style={{ cursor: 'pointer', marginBottom: '0.5rem', color: 'blue' }}
+                  >
+                    {songName} ({version})
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </div>
       )}
+
+{/* Audio Player */}
+{songUrl && (
+  <div className="audio-player">
+    <h3>Now Playing</h3>
+    <audio id="audio-player" controls key={songUrl}>
+      <source src={songUrl} type="audio/mp3" />
+      Your browser does not support the audio element.
+    </audio>
+    <button onClick={handleTogglePlay}>
+      {document.getElementById('audio-player')?.paused ? 'Play' : 'Pause'}
+    </button>
+  </div>
+)}
     </div>
   );
 }

@@ -12,6 +12,13 @@ resource "aws_apigatewayv2_api" "lambda" {
   }
 }
 
+resource "aws_cloudwatch_log_group" "api_gw" {
+  name = "/aws/api_gw/${aws_apigatewayv2_api.lambda.name}"
+
+  retention_in_days = 30
+}
+
+
 # Cognito Authorizer for API Gateway
 resource "aws_apigatewayv2_authorizer" "cognito_authorizer" {
   name             = "CognitoAuthorizer"
@@ -48,65 +55,4 @@ resource "aws_apigatewayv2_stage" "lambda" {
       integrationErrorMessage = "$context.integrationErrorMessage"
     })
   }
-}
-
-# Integration for the upload_song route
-resource "aws_apigatewayv2_integration" "upload_song_integration" {
-  api_id              = aws_apigatewayv2_api.lambda.id
-  integration_uri     = var.upload_song_lambda_invoke_arn
-  integration_type    = "AWS_PROXY"
-  integration_method  = "POST"
-}
-
-# Integration for the download_song route
-resource "aws_apigatewayv2_integration" "download_song_integration" {
-  api_id              = aws_apigatewayv2_api.lambda.id
-  integration_uri     = var.download_song_lambda_invoke_arn
-  integration_type    = "AWS_PROXY"
-  integration_method  = "POST"
-}
-
-# Route for upload_song with JWT authentication
-resource "aws_apigatewayv2_route" "upload_song_route" {
-  api_id            = aws_apigatewayv2_api.lambda.id
-  route_key         = "POST /upload_song"
-  target            = "integrations/${aws_apigatewayv2_integration.upload_song_integration.id}"
-  authorization_type = "JWT"
-  authorizer_id      = aws_apigatewayv2_authorizer.cognito_authorizer.id
-}
-
-# Route for upload_song with JWT authentication
-resource "aws_apigatewayv2_route" "download_song_route" {
-  api_id            = aws_apigatewayv2_api.lambda.id
-  route_key         = "POST /download_song"
-  target            = "integrations/${aws_apigatewayv2_integration.download_song_integration.id}"
-  authorization_type = "JWT"
-  authorizer_id      = aws_apigatewayv2_authorizer.cognito_authorizer.id
-}
-
-# CloudWatch Log Group for API Gateway
-resource "aws_cloudwatch_log_group" "api_gw" {
-  name = "/aws/api_gw/${aws_apigatewayv2_api.lambda.name}"
-
-  retention_in_days = 30
-}
-
-# Lambda Permission to allow API Gateway to invoke the Lambda
-resource "aws_lambda_permission" "api_gw" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = var.upload_song_lambda_invoke_name
-  principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_apigatewayv2_api.lambda.execution_arn}/*/*"
-}
-
-# Lambda Permission to allow API Gateway to invoke the Lambda
-resource "aws_lambda_permission" "api_gw_download" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = var.download_song_lambda_invoke_name
-  principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_apigatewayv2_api.lambda.execution_arn}/*/*"
 }

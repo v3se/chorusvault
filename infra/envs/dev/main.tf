@@ -121,15 +121,23 @@ module "lambda_download_songs" {
   memory_size      = 128
   lambda_code_path = "../../../lambda/download_song"
   environment_variables = {
-    S3_BUCKET_NAME = module.s3_bucket_audio.s3_bucket_id
     DYNAMODB_TABLE = module.dynamodb_songs.table_name
+    S3_BUCKET_NAME = module.s3_bucket_audio.s3_bucket_id
   }
   iam_policy_json = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
         Action = [
-          "s3:PutObject",
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:Query"
+        ],
+        Effect   = "Allow",
+        Resource = module.dynamodb_songs.table_arn
+      },
+      {
+        Action = [
           "s3:GetObject"
         ],
         Effect   = "Allow",
@@ -148,18 +156,90 @@ module "lambda_download_songs" {
   })
 }
 
+module "lambda_fetch_songs" {
+  source           = "../../modules/lambda"
+  function_name    = "fetch_songs_function"
+  lambda_bucket_id = module.s3_lambda_code.s3_bucket_id
+  handler          = "lambda/fetch_songs/index.handler"
+  runtime          = "nodejs22.x"
+  timeout          = 60
+  memory_size      = 128
+  lambda_code_path = "../../../lambda/fetch_song_metadata"
+  environment_variables = {
+    S3_BUCKET_NAME = module.s3_bucket_audio.s3_bucket_id
+    DYNAMODB_TABLE = module.dynamodb_songs.table_name
+  }
+  iam_policy_json = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject"
+        ],
+        Effect   = "Allow",
+        Resource = "arn:aws:s3:::${module.s3_bucket_audio.s3_bucket_id}/*"
+      },
+      {
+        Action = [
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ],
+        Effect   = "Allow",
+        Resource = module.dynamodb_songs.table_arn
+      },
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        Effect   = "Allow",
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}
+
 # Lambda and API Gateway Module
 module "lambda_api_gateway" {
   source = "../../modules/api_gateway" # Reference to the Lambda and API Gateway module
-
-  # Pass the required variables
-  s3_bucket_name                 = module.s3_bucket_audio.s3_bucket_id # Referencing the output from S3 module
-  dynamodb_table_name            = module.dynamodb_songs.table_name      # Referencing the DynamoDB table
-  upload_song_lambda_invoke_arn  = module.lambda_upload_songs.lambda_invoke_arn
-  upload_song_lambda_invoke_name = module.lambda_upload_songs.lambda_name
-  download_song_lambda_invoke_arn  = module.lambda_download_songs.lambda_invoke_arn
-  download_song_lambda_invoke_name = module.lambda_download_songs.lambda_name
   region                         = var.region
   cognito_user_pool_client_id    = module.cognito.user_pool_client_id
   cognito_user_pool_id           = module.cognito.user_pool_id
+}
+
+module "lambda_api_gateway_route_upload" {
+  source = "../../modules/api_gateway_routes" # Reference to the Lambda and API Gateway module
+  api_gw_id = module.lambda_api_gateway.api_gw_id
+  api_gw_authorizer_id = module.lambda_api_gateway.api_gw_authorizer_id
+  api_gw_execution_arn = module.lambda_api_gateway.api_gw_execution_arn
+  route_key = "POST /upload_song"
+  integration_method = "POST"
+  lambda_invoke_name = module.lambda_upload_songs.lambda_name
+  lambda_invoke_arn = module.lambda_upload_songs.lambda_invoke_arn
+}
+
+module "lambda_api_gateway_route_download" {
+  source = "../../modules/api_gateway_routes" # Reference to the Lambda and API Gateway module
+  api_gw_id = module.lambda_api_gateway.api_gw_id
+  api_gw_authorizer_id = module.lambda_api_gateway.api_gw_authorizer_id
+  api_gw_execution_arn = module.lambda_api_gateway.api_gw_execution_arn
+  route_key = "POST /download_song"
+  integration_method = "POST"
+  lambda_invoke_name = module.lambda_download_songs.lambda_name
+  lambda_invoke_arn = module.lambda_download_songs.lambda_invoke_arn
+}
+
+module "lambda_api_gateway_route_fetch_metadata" {
+  source = "../../modules/api_gateway_routes" # Reference to the Lambda and API Gateway module
+  api_gw_id = module.lambda_api_gateway.api_gw_id
+  api_gw_authorizer_id = module.lambda_api_gateway.api_gw_authorizer_id
+  api_gw_execution_arn = module.lambda_api_gateway.api_gw_execution_arn
+  route_key = "GET /fetch_song_metadata"
+  integration_method = "POST"
+  lambda_invoke_name = module.lambda_fetch_songs.lambda_name
+  lambda_invoke_arn = module.lambda_fetch_songs.lambda_invoke_arn
 }

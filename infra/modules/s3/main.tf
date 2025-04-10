@@ -31,7 +31,7 @@ resource "aws_s3_bucket_cors_configuration" "cors" {
     allowed_headers = ["*"]
     allowed_methods = ["PUT", "POST", "GET"]
     allowed_origins = ["*"]  # or "http://localhost:3000", etc.
-    expose_headers  = ["ETag"]
+    expose_headers  = ["ETag", "Content-Type"]
     max_age_seconds = 3000
   }
 }
