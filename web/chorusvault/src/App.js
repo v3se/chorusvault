@@ -1,7 +1,10 @@
-// src/App.js
 import React, { useState } from 'react';
 import { loginUser } from './aws-service';  // Import the function from aws-service.js
 import axios from 'axios';
+import {
+  CognitoIdentityProviderClient,
+  RespondToAuthChallengeCommand,
+} from '@aws-sdk/client-cognito-identity-provider';
 
 function App() {
   // State for handling username, password, and login status
@@ -10,6 +13,13 @@ function App() {
   const [error, setError] = useState(null); // To capture any login errors
   const [loading, setLoading] = useState(false); // For loading state
 
+  // State for setting a new password
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPasswordField, setShowNewPasswordField] = useState(false);
+  const [authChallengeSession, setAuthChallengeSession] = useState(null);
+
+  // JWT
+  const [accessToken, setAccessToken] = useState(null); // Add this state
   // State for song upload
   const [songFile, setSongFile] = useState(null);  // The file to be uploaded
   const [isUploading, setIsUploading] = useState(false); // For tracking upload state
@@ -19,17 +29,69 @@ function App() {
   // Handle login when the user clicks the button
   const handleLogin = async () => {
     setLoading(true);
-    setError(null); // Reset previous error
+    setError(null);
 
     try {
+      // Perform the login
       const result = await loginUser(username, password);
-      console.log('Login successful', result);
-      // Redirect or update state as needed after login
+      console.log('Login result', result);
+
+      // Check if the result indicates a NEW_PASSWORD_REQUIRED challenge
+      if (result?.ChallengeName === 'NEW_PASSWORD_REQUIRED') {
+        setShowNewPasswordField(true);  // Show the new password field for the user to reset their password
+        setAuthChallengeSession(result.Session);  // Save the session for the password reset request
+        setError('You must set a new password to continue.');
+        return;
+      }
+
+      // Normal login flow
+      console.log('Logged in successfully');
+
+      // If the login was successful, extract the JWT token
+      const accessToken = result?.AuthenticationResult?.AccessToken;
+
+      if (accessToken) {
+        setAccessToken(accessToken);  // Store the token in state or your preferred storage
+        setError(null); // Clear any errors
+      } else {
+        setError('Failed to retrieve access token.');
+      }
     } catch (err) {
       console.error('Login failed', err);
       setError('Login failed. Please check your credentials and try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleNewPassword = async () => {
+    if (!newPassword) {
+      setError('Please enter a new password.');
+      return;
+    }
+
+    try {
+      const client = new CognitoIdentityProviderClient({ region: process.env.REACT_APP_AWS_REGION });
+      const command = new RespondToAuthChallengeCommand({
+        ChallengeName: 'NEW_PASSWORD_REQUIRED',
+        ClientId: process.env.REACT_APP_COGNITO_CLIENT_ID,
+        Session: authChallengeSession,
+        ChallengeResponses: {
+          USERNAME: username,
+          NEW_PASSWORD: newPassword,
+        },
+      });
+
+      const response = await client.send(command);
+      console.log('Password reset successful:', response);
+
+      setShowNewPasswordField(false);
+      setNewPassword('');
+      setError(null);
+      alert('Password updated successfully. Please log in again.');
+    } catch (err) {
+      console.error('Failed to update password:', err);
+      setError('Failed to update password. Please try again.');
     }
   };
 
@@ -43,10 +105,12 @@ function App() {
   // Get Presigned URL from the backend (Lambda function via API Gateway)
   const getPresignedUrl = async () => {
     try {
-      const response = await axios.post('https://2gv0bqmref.execute-api.eu-central-1.amazonaws.com/chorusvault_stage/upload_song', {
-        song_id: '2',  // Hardcoded song_id for now (you can make this dynamic if needed)
+      const response = await axios.post(process.env.REACT_APP_API_UPLOAD_URL, {
+        song_id: '2',  // Hardcoded song_id for now
         version: 'v1',
         timestamp: Date.now(),
+      }, {
+        headers: { Authorization: accessToken }
       });
       return response.data.presigned_url;
     } catch (error) {
@@ -67,14 +131,9 @@ function App() {
     setUploadSuccess(false);
 
     try {
-      // Step 1: Get the presigned URL from your Lambda backend
       const presignedUrl = await getPresignedUrl();
-
-      // Step 2: Upload the song to S3 using the presigned URL
       const uploadResponse = await axios.put(presignedUrl, songFile, {
-        headers: {
-          'Content-Type': songFile.type,  // Ensure the correct content type
-        },
+        headers: { 'Content-Type': songFile.type }
       });
 
       console.log('Song uploaded successfully:', uploadResponse);
@@ -89,43 +148,71 @@ function App() {
 
   return (
     <div className="App">
-      <h1>Login to My App</h1>
+      {/* User login status display */}
+      {accessToken && (
+        <div style={{ position: 'absolute', top: 20, right: 20, fontWeight: 'bold' }}>
+          <span>{`Logged in as ${username}`}</span>
+        </div>
+      )}
 
       {/* Login Form */}
-      <input
-        type="text"
-        placeholder="Username"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-      />
-      <input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <button onClick={handleLogin} disabled={loading}>
-        {loading ? 'Logging in...' : 'Login'}
-      </button>
+      {!accessToken && (
+        <div className="login-container">
+          <h1>Login to My App</h1>
 
-      {/* Display login error */}
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+          <input
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button onClick={handleLogin} disabled={loading}>
+            {loading ? 'Logging in...' : 'Login'}
+          </button>
 
-      {/* Song Upload Section */}
-      <div>
-        <h2>Upload Song</h2>
-        {/* File Input */}
-        <input type="file" onChange={handleFileChange} />
-        
-        {/* Upload Button */}
-        <button onClick={handleUpload} disabled={isUploading}>
-          {isUploading ? 'Uploading...' : 'Upload Song'}
-        </button>
+          {error && <p style={{ color: 'red' }}>{error}</p>}
 
-        {/* Display upload status */}
-        {uploadSuccess && <p style={{ color: 'green' }}>Song uploaded successfully!</p>}
-        {uploadError && <p style={{ color: 'red' }}>{uploadError}</p>}
-      </div>
+          {/* NEW PASSWORD REQUIRED FLOW */}
+          {showNewPasswordField && (
+            <div style={{ marginTop: '1rem' }}>
+              <p style={{ color: 'orange' }}>
+                A new password is required. Please set your new password below:
+              </p>
+              <input
+                type="password"
+                placeholder="Enter new password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+              <button onClick={handleNewPassword}>
+                Submit New Password
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Song Upload Section (only visible after login) */}
+      {accessToken && (
+        <div className="upload-section">
+          <h2>Upload Song</h2>
+
+          <input type="file" onChange={handleFileChange} />
+
+          <button onClick={handleUpload} disabled={isUploading}>
+            {isUploading ? 'Uploading...' : 'Upload Song'}
+          </button>
+
+          {uploadSuccess && <p style={{ color: 'green' }}>Song uploaded successfully!</p>}
+          {uploadError && <p style={{ color: 'red' }}>{uploadError}</p>}
+        </div>
+      )}
     </div>
   );
 }

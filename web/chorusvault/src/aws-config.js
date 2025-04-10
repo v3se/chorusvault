@@ -1,9 +1,7 @@
-// aws-config.js
 export const awsConfig = {
-    region: 'eu-central-1',
+    region: process.env.REACT_APP_AWS_REGION,
     cognito: {
-        userPoolId: 'eu-central-1_bO9hJ9QGF',
-        clientId: '2kvr2buvin9i33kjbuaevn5h2q'
+      userPoolId: process.env.REACT_APP_COGNITO_USER_POOL_ID,
+      clientId: process.env.REACT_APP_COGNITO_CLIENT_ID
     }
   };
-  
