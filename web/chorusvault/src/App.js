@@ -1,3 +1,4 @@
+import './App.css';
 import React, { useState } from 'react';
 import { loginUser } from './aws-service';  // Import the function from aws-service.js
 import axios from 'axios';
@@ -17,10 +18,11 @@ function App() {
   const [newPassword, setNewPassword] = useState('');
   const [showNewPasswordField, setShowNewPasswordField] = useState(false);
   const [authChallengeSession, setAuthChallengeSession] = useState(null);
-
   // JWT
   const [accessToken, setAccessToken] = useState(null); // Add this state
   // State for song upload
+  const [songName, setSongName] = useState('');
+  const [version, setVersion] = useState('');
   const [songFile, setSongFile] = useState(null);  // The file to be uploaded
   const [isUploading, setIsUploading] = useState(false); // For tracking upload state
   const [uploadError, setUploadError] = useState(null);  // For upload error messages
@@ -62,6 +64,18 @@ function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Handle logout
+  const handleLogout = () => {
+    // Clear the access token and reset the relevant states
+    setAccessToken(null);
+    setUsername('');
+    setPassword('');
+    setError(null);
+    setShowNewPasswordField(false);
+    setNewPassword('');
+    alert('You have been logged out.');
   };
 
   const handleNewPassword = async () => {
@@ -106,9 +120,9 @@ function App() {
   const getPresignedUrl = async () => {
     try {
       const response = await axios.post(process.env.REACT_APP_API_UPLOAD_URL, {
-        song_id: '2',  // Hardcoded song_id for now
-        version: 'v1',
+        version,
         timestamp: Date.now(),
+        song_name: songName
       }, {
         headers: { Authorization: accessToken }
       });
@@ -117,7 +131,7 @@ function App() {
       console.error('Error fetching presigned URL:', error);
       throw new Error('Unable to get presigned URL.');
     }
-  };
+  }; 
 
   // Handle song upload to S3
   const handleUpload = async () => {
@@ -150,15 +164,18 @@ function App() {
     <div className="App">
       {/* User login status display */}
       {accessToken && (
-        <div style={{ position: 'absolute', top: 20, right: 20, fontWeight: 'bold' }}>
-          <span>{`Logged in as ${username}`}</span>
-        </div>
+      <div className="user-info-container">
+      <span className="user-info">@{username}</span>
+      <button className="logout-button" onClick={handleLogout}>
+        Logout
+      </button>
+    </div>
       )}
-
       {/* Login Form */}
       {!accessToken && (
         <div className="login-container">
-          <h1>Login to My App</h1>
+          <h1>Welcome</h1>
+          <p>Login to ChorusVault</p>
 
           <input
             type="text"
@@ -202,6 +219,21 @@ function App() {
       {accessToken && (
         <div className="upload-section">
           <h2>Upload Song</h2>
+          {/* Song name input */}
+          <input
+            type="text"
+            placeholder="Song Name"
+            value={songName}
+            onChange={(e) => setSongName(e.target.value)}
+          />
+
+          {/* Version input */}
+          <input
+            type="text"
+            placeholder="Version (e.g. v1)"
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+          />
 
           <input type="file" onChange={handleFileChange} />
 

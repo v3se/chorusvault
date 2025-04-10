@@ -1,10 +1,10 @@
 .App {
   display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
+  align-items: center;
   height: 100vh;
   background-color: #f0f4f8;
+  margin: 0;
 }
 
 .login-container {
@@ -13,15 +13,55 @@
   border-radius: 8px;
   box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.1);
   text-align: center;
-  width: 300px;
+  width: 100%;
+  max-width: 400px; /* Ensuring the form doesn't stretch too wide */
+}
+
+/* Container for user info (username and logout button) */
+.user-info-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px; /* Space between username and logout button */
+}
+
+/* Style for the user info (logged in as [username]) */
+.user-info {
+  font-size: 20px;
+  color: #333;
+  font-weight: 600;
+}
+
+/* Style for the logout button */
+.logout-button {
+  padding: 8px 12px;
+  background-color: #4caf50; /* Red color */
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.logout-button:hover {
+  background-color: #43a046; /* Darker red on hover */
+}
+
+h1 {
+  margin-bottom: 1rem;
 }
 
 input {
   width: 100%;
   padding: 10px;
-  margin: 10px 0;
+  margin: 10px 0; /* Space between the fields */
   border: 1px solid #ddd;
   border-radius: 4px;
+  box-sizing: border-box;
 }
 
 button {
@@ -44,7 +84,8 @@ button:disabled {
   padding: 2rem;
   border-radius: 8px;
   box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.1);
-  width: 300px;
+  width: 100%;
+  max-width: 400px;
   text-align: center;
 }
 

@@ -33,7 +33,7 @@ exports.handler = async (event) => {
     };
   }
   
-  const { song_id, version, timestamp } = body;
+  const { song_name, version, timestamp } = body;
 
   let validTimestamp;
   try {
@@ -48,8 +48,12 @@ exports.handler = async (event) => {
     console.log(`Error processing timestamp: ${e.message}, using current time instead`);
   }
 
+  // Generate a unique song ID, e.g., using UUID or any unique identifier
+  const song_id = `song-${Date.now()}`;  // Here, we use the timestamp to generate a unique ID for the song
+
   const songMetadata = {
     song_id,
+    song_name,
     uploaded_at: validTimestamp,
     s3_object_key: `${song_id}.mp3`,
     version: version || "v1",
