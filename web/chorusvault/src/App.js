@@ -1,90 +1,154 @@
 import './App.css';
-import React, { useState } from 'react';
-import { loginUser } from './aws-service';  // Import the function from aws-service.js
+import WaveSurfer from 'wavesurfer.js';
+import Hover from 'wavesurfer.js/dist/plugins/hover.esm.js'
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import {
-  CognitoIdentityProviderClient,
-  RespondToAuthChallengeCommand,
-} from '@aws-sdk/client-cognito-identity-provider';
+import { CognitoIdentityProviderClient, RespondToAuthChallengeCommand } from '@aws-sdk/client-cognito-identity-provider';
+
+import LoginForm from './LoginForm';
+import UploadForm from './UploadForm';
+import SongList from './SongList';
+import AudioPlayer from './AudioPlayer';
+import { loginUser } from './aws-service';
+
 
 function App() {
-  // State for handling username, password, and login status
+  // State management as before
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState(null); // To capture any login errors
-  const [loading, setLoading] = useState(false); // For loading state
-
-  // State for setting a new password
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [showNewPasswordField, setShowNewPasswordField] = useState(false);
   const [authChallengeSession, setAuthChallengeSession] = useState(null);
-  // JWT
-  const [accessToken, setAccessToken] = useState(null); // Add this state
-  // State for song upload
-  const [songs, setSongs] = useState([]); // All song metadata from DynamoDB
+  const [accessToken, setAccessToken] = useState(null);
+  const [songs, setSongs] = useState([]);
   const [songName, setSongName] = useState('');
   const [version, setVersion] = useState('');
-  const [songFile, setSongFile] = useState(null);  // The file to be uploaded
-  const [isUploading, setIsUploading] = useState(false); // For tracking upload state
-  const [uploadError, setUploadError] = useState(null);  // For upload error messages
-  const [uploadSuccess, setUploadSuccess] = useState(false); // For upload success
-  const [songUrl, setSongUrl] = useState(null); // State to store the song URL for playback
+  const [songFile, setSongFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [songUrl, setSongUrl] = useState(null);
 
+  // New ref for WaveSurfer instance
+  const wavesurferRef = useRef(null);
+  const currentSongUrlRef = useRef(null);
+
+
+  useEffect(() => {
+    if (!songUrl) return;
+  
+    // Make sure the DOM element exists
+    const waveformEl = document.getElementById('waveform');
+    if (!waveformEl) {
+      console.warn('Waveform container not found. Delaying init.');
+      return;
+    }
+  
+    // Load the waveform
+    initializeWaveSurfer(songUrl);
+  }, [songUrl]);
+  
+  
+  
+
+  // Fetch song data
   const fetchSongs = async (token) => {
     try {
       const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/fetch_song_metadata`, {
         headers: { Authorization: token }
       });
-      console.log(response)
       setSongs(response.data.items || []);
     } catch (error) {
       console.error('Failed to fetch songs:', error);
     }
   };
 
+  // Setup WaveSurfer.js for audio visualization
+  const initializeWaveSurfer = (url) => {
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+      console.warn('Invalid or missing URL in initializeWaveSurfer:', url);
+      return;
+    }
+  
+    const container = document.getElementById('waveform');
+    if (!container) {
+      console.warn('Waveform container does not exist.');
+      return;
+    }
+  
+    if (wavesurferRef.current) {
+      wavesurferRef.current.destroy();
+    }
+  
+    const waveSurferInstance = WaveSurfer.create({
+      container,
+      waveColor: 'violet',
+      progressColor: 'purple',
+      height: 120,
+      barWidth: 5,
+      barRadius: 10,
+      plugins: [
+        Hover.create({
+          lineColor: '#ff0000',
+          lineWidth: 2,
+          labelBackground: '#555',
+          labelColor: '#fff',
+          labelSize: '11px',
+        }),
+      ],
+    });
+  
+    waveSurferInstance.on('interaction', () => {
+      waveSurferInstance.playPause();
+    });
+  
+    waveSurferInstance.load(url);
+    wavesurferRef.current = waveSurferInstance;
+  };
+  
+
   const handlePlaySong = async (songId) => {
     try {
       const url = await getPresignedUrlForGet(songId);
+      
+      if (url === currentSongUrlRef.current) {
+        console.log('Same song clicked, not reloading.');
+        return; // Don’t reinitialize if it’s the same URL
+      }
+  
       setSongUrl(url);
+      currentSongUrlRef.current = url;
+      initializeWaveSurfer(url);
     } catch (error) {
       setError('Unable to play song.');
     }
   };
   
-  // Handle login when the user clicks the button
+
+  // Login and authentication logic (as before)
   const handleLogin = async () => {
     setLoading(true);
     setError(null);
-
     try {
-      // Perform the login
       const result = await loginUser(username, password);
-      console.log('Login result', result);
-
-      // Check if the result indicates a NEW_PASSWORD_REQUIRED challenge
       if (result?.ChallengeName === 'NEW_PASSWORD_REQUIRED') {
-        setShowNewPasswordField(true);  // Show the new password field for the user to reset their password
-        setAuthChallengeSession(result.Session);  // Save the session for the password reset request
+        setShowNewPasswordField(true);
+        setAuthChallengeSession(result.Session);
         setError('You must set a new password to continue.');
         return;
       }
 
-      // Normal login flow
-      console.log('Logged in successfully');
-
-      // If the login was successful, extract the JWT token
       const accessToken = result?.AuthenticationResult?.AccessToken;
-
       if (accessToken) {
-        setAccessToken(accessToken);  // Store the token in state or your preferred storage
-        setError(null); // Clear any errors
+        setAccessToken(accessToken);
+        setError(null);
         await fetchSongs(accessToken);
       } else {
         setError('Failed to retrieve access token.');
       }
-
     } catch (err) {
-      console.error('Login failed', err);
       setError('Login failed. Please check your credentials and try again.');
     } finally {
       setLoading(false);
@@ -103,6 +167,7 @@ function App() {
     alert('You have been logged out.');
   };
 
+  // Handle new password submission
   const handleNewPassword = async () => {
     if (!newPassword) {
       setError('Please enter a new password.');
@@ -161,7 +226,6 @@ function App() {
 
   // Function to get presigned URL for GET request (retrieve song from S3)
   const getPresignedUrlForGet = async (songId) => {
-    console.log(songId)
     try {
       const response = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/download_song`, {
         song_id: songId,
@@ -177,17 +241,6 @@ function App() {
       throw new Error('Unable to get presigned URL.');
     }
   };
-
-const handleTogglePlay = () => {
-  const audioElement = document.getElementById('audio-player');
-  if (audioElement.paused) {
-    audioElement.play().catch((error) => {
-      console.error('Error starting playback:', error);
-    });
-  } else {
-    audioElement.pause();
-  }
-};
 
   // Handle song upload to S3
   const handleUpload = async () => {
@@ -208,11 +261,9 @@ const handleTogglePlay = () => {
 
       console.log('Song uploaded successfully:', uploadResponse);
       setUploadSuccess(true);
-      console.log(uploadResponse)
       // After the song is uploaded, get the presigned URL for GET and set the song URL
       const songId = uploadResponse.data.song_id; // Assuming the response contains a song_id
-      const songUrl = await getPresignedUrlForGet(songId);
-      setSongUrl(songUrl);  // Set the song URL for playback
+      initializeWaveSurfer(songUrl);  // Initialize the waveform for the uploaded song
     } catch (error) {
       console.error('Error uploading song:', error);
       setUploadError('Error uploading song. Please try again.');
@@ -223,121 +274,47 @@ const handleTogglePlay = () => {
 
   return (
     <div className="App">
-      {/* User login status display */}
       {accessToken && (
         <div className="user-info-container">
           <span className="user-info">@{username}</span>
-          <button className="logout-button" onClick={handleLogout}>
-            Logout
-          </button>
+          <button className="logout-button" onClick={handleLogout}>Logout</button>
         </div>
       )}
 
-      {/* Login Form */}
       {!accessToken && (
-        <div className="login-container">
-          <h1>Welcome</h1>
-          <p>Login to ChorusVault</p>
-
-          <input
-            type="text"
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button onClick={handleLogin} disabled={loading}>
-            {loading ? 'Logging in...' : 'Login'}
-          </button>
-
-          {error && <p style={{ color: 'red' }}>{error}</p>}
-
-          {/* NEW PASSWORD REQUIRED FLOW */}
-          {showNewPasswordField && (
-            <div style={{ marginTop: '1rem' }}>
-              <p style={{ color: 'orange' }}>
-                A new password is required. Please set your new password below:
-              </p>
-              <input
-                type="password"
-                placeholder="Enter new password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-              />
-              <button onClick={handleNewPassword}>
-                Submit New Password
-              </button>
-            </div>
-          )}
-        </div>
+        <LoginForm
+          username={username}
+          setUsername={setUsername}
+          password={password}
+          setPassword={setPassword}
+          handleLogin={handleLogin}
+          loading={loading}
+          error={error}
+          showNewPasswordField={showNewPasswordField}
+          newPassword={newPassword}
+          setNewPassword={setNewPassword}
+          handleNewPassword={handleNewPassword}
+        />
       )}
 
-      {/* Song Upload Section (only visible after login) */}
       {accessToken && (
-        <div className="upload-section">
-          <h2>Upload Song</h2>
-          <input
-            type="text"
-            placeholder="Song Name"
-            value={songName}
-            onChange={(e) => setSongName(e.target.value)}
+        <>
+          <UploadForm
+            songName={songName}
+            setSongName={setSongName}
+            version={version}
+            setVersion={setVersion}
+            handleFileChange={handleFileChange}
+            handleUpload={handleUpload}
+            isUploading={isUploading}
+            uploadSuccess={uploadSuccess}
+            uploadError={uploadError}
           />
-          <input
-            type="text"
-            placeholder="Version (e.g. v1)"
-            value={version}
-            onChange={(e) => setVersion(e.target.value)}
-          />
-          <input type="file" onChange={handleFileChange} />
-          <button onClick={handleUpload} disabled={isUploading}>
-            {isUploading ? 'Uploading...' : 'Upload Song'}
-          </button>
-
-          {uploadSuccess && <p style={{ color: 'green' }}>Song uploaded successfully!</p>}
-          {uploadError && <p style={{ color: 'red' }}>{uploadError}</p>}
-
-          <div className="song-list-section">
-            <h2>Your Songs</h2>
-            {songs.length === 0 && <p>No songs uploaded yet.</p>}
-            <ul>
-              {songs.map((song) => {
-                const songName = song.song_name?.S || "Unknown Song";
-                const version = song.version?.S || "No version";
-                const songId = song.song_id?.S || "No ID";
-
-                return (
-                  <li
-                    key={songId}
-                    onClick={() => handlePlaySong(songId)}
-                    style={{ cursor: 'pointer', marginBottom: '0.5rem', color: 'blue' }}
-                  >
-                    {songName} ({version})
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </div>
+          <SongList songs={songs} handlePlaySong={handlePlaySong} />
+        </>
       )}
 
-{/* Audio Player */}
-{songUrl && (
-  <div className="audio-player">
-    <h3>Now Playing</h3>
-    <audio id="audio-player" controls key={songUrl}>
-      <source src={songUrl} type="audio/mp3" />
-      Your browser does not support the audio element.
-    </audio>
-    <button onClick={handleTogglePlay}>
-      {document.getElementById('audio-player')?.paused ? 'Play' : 'Pause'}
-    </button>
-  </div>
-)}
+      {songUrl && <AudioPlayer />}
     </div>
   );
 }
